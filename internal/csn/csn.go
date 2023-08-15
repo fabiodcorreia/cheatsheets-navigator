@@ -1,7 +1,9 @@
 package csn
 
 import (
+	"bufio"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -35,8 +37,8 @@ const UsageMessage = `
 `
 
 type Page struct {
-	fullPath string
-	name     string
+	FullPath string
+	Name     string
 }
 
 // Commands function will handle the parse of flags and commands and
@@ -44,8 +46,7 @@ type Page struct {
 
 // getRepository will read the Env Var to get the directory to scan for pages.
 // If the variable is not set, not valid or not a directly it will return an error.
-func getRepository() (string, error) {
-	repoPath := os.Getenv(envPages)
+func getRepository(repoPath string) (string, error) {
 	if repoPath == "" {
 		return "", fmt.Errorf("environment variable %q not found", envPages)
 	}
@@ -118,8 +119,8 @@ func getPages(repo string) ([]Page, error) {
 
 		if !d.IsDir() && filepath.Ext(path) == ".md" {
 			pages = append(pages, Page{
-				fullPath: path,
-				name:     strings.ReplaceAll(strings.TrimPrefix(path, repo+string(os.PathSeparator)), " ", "_"),
+				FullPath: path,
+				Name:     strings.TrimSuffix(strings.ReplaceAll(strings.TrimPrefix(path, repo+string(os.PathSeparator)), " ", "_"), ".md"),
 			})
 		}
 
@@ -129,14 +130,18 @@ func getPages(repo string) ([]Page, error) {
 	return pages, err
 }
 
+func ScanForPages(repo string) ([]Page, error) {
+	// get pages from repo
+	pages, err := getPages(repo)
+	if err != nil {
+		return nil, err
+	}
+	return pages, nil
+}
+
 // showPages will get the repository path, scan for pages and print the result
 // one page per line.
-func ShowPages() error {
-	// get repo path
-	repo, err := getRepository()
-	if err != nil {
-		return err
-	}
+func ShowPages(repo string) error {
 	// get pages from repo
 	pages, err := getPages(repo)
 	if err != nil {
@@ -144,39 +149,47 @@ func ShowPages() error {
 	}
 	// print pages as list
 	for i := range pages {
-		fmt.Printf("%s\n", pages[i].name)
+		fmt.Printf("%s\n", pages[i].Name)
 	}
 	println("")
 	return nil
 }
 
 // Read Page will open a file by name and read the content and return an io.Reader
-func ReadPage(page Page, filter string) (string, error) {
-	_, err := os.ReadFile(page.fullPath)
-  if err != nil {
-    return "", err
-  }
+func ReadPage(page Page) (io.ReadCloser, error) {
+	content, err := os.Open(page.FullPath)
+	if err != nil {
+		return nil, fmt.Errorf("fail to load page: %w", err)
+	}
+
+	return content, nil
 }
 
-// Filter Page will get an io.Reader and parse the content to find the sections
+func FilterPage(filter string, content io.ReadCloser) ([]string, error) {
+	sc := bufio.NewScanner(content)
+	var filteredContent []string // Testar performance com make
+	var sectionContent string
 
+	defer content.Close()
 
+	for sc.Scan() {
+		line := sc.Text()
+		if strings.HasPrefix(line, "#") {
+			if strings.Contains(sectionContent, filter) {
+				filteredContent = append(filteredContent, sectionContent)
+			}
+			sectionContent = ""
+		}
+		sectionContent += line + "\n"
+	}
 
+	if sc.Err() != nil {
+		return nil, fmt.Errorf("error while reading the page file: %w", sc.Err())
+	}
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+	if strings.Contains(sectionContent, filter) {
+		filteredContent = append(filteredContent, sectionContent)
+	}
+	// TODO: Highlight the filter on the filtered content.
+	return filteredContent, nil
+}

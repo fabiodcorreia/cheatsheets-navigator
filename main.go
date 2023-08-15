@@ -1,15 +1,14 @@
 package main
 
 import (
-	"bufio"
 	"flag"
 	"fmt"
 	"os"
-	"strings"
 
 	"github.com/fabiodcorreia/cheatsheets-navigator/internal/csn"
 )
 
+// TODO: Add ENV description to the help page.
 func main() {
 	listFlag := flag.Bool("ls", false, "List all teh cheatsheet pages available.")
 	helpFlag := flag.Bool("h", false, "Display this message.")
@@ -27,75 +26,59 @@ func main() {
 
 	args := flag.Args()
 
-	if *listFlag || len(args) == 0 {
-		// fmt.Println(listPages())
-		csn.ShowPages()
+	if !*listFlag && len(args) == 0 {
+		fmt.Print(csn.UsageMessage)
+		return
+	}
+
+	repo, _ := os.LookupEnv("CSN_PAGES")
+
+	if *listFlag {
+		csn.ShowPages(repo)
+		return
+	}
+	// If args > 0 csn.ScanForPages and store it
+	// Find the page from the input, if not found return error
+	// With that page found call ReadPage or FilterPage
+
+	pages, err := csn.ScanForPages(repo)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	page, err := findPageByName(args[0], pages)
+	if err != nil {
+		fmt.Println(err)
 		return
 	}
 
 	if len(args) == 1 {
-		_, err := readPage(args[0])
 
-
-
-
+		r, err := csn.ReadPage(page)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
 		// TODO: Improve this checking if bat is installed
 		// writeLess(page, "bat -l markdown --color always")
-	}
 
-	if len(args) > 1 {
-		_, err := readAndFilterMarkdownFile(args[0], args[1])
-		if err != nil {
-			fmt.Println(err)
-			return
-		}
-		// writeLess(strings.Join(content, "\n"), "bat")
-	}
-}
-
-func readPage(pageName string) (string, error) {
-	pagePath := ""
-	pagePath = pagePath + "/" + pageName + ".md"
-
-	content, err := os.ReadFile(pagePath)
-	if err != nil {
-		return "", fmt.Errorf("fail to read the repository page: %w", err)
-	}
-
-	return string(content), nil
-}
-
-func readAndFilterMarkdownFile(pageName, filterWord string) ([]string, error) {
-	var filteredContent []string
-	var section string
-
-	pagePath := ""
-
-	pagePath = pagePath + "/" + pageName + ".md"
-
-	content, err := os.ReadFile(pagePath)
-	if err != nil {
-		return filteredContent, fmt.Errorf("fail to read the repository page: %w", err)
-	}
-	// BUG: For some reason it not getting all the matches on NvChad Keys and Commands if I search by C- for example
-	scanner := bufio.NewScanner(strings.NewReader(string(content)))
-	for scanner.Scan() {
-		line := scanner.Text()
-
-		if strings.HasPrefix(line, "#") || strings.HasPrefix(line, "##") || strings.HasPrefix(line, "###") {
-			if strings.Contains(section, filterWord) {
-				sectionHl := strings.ReplaceAll(section, filterWord, "\033[1;31m"+filterWord+"\033[0m")
-				filteredContent = append(filteredContent, sectionHl)
+		if len(args) > 1 {
+			_, err := csn.FilterPage(args[0], r)
+			if err != nil {
+				fmt.Println(err)
+				return
 			}
-			section = ""
+			// writeLess(strings.Join(content, "\n"), "bat")
 		}
-
-		section += line + "\n"
 	}
+}
 
-	return filteredContent, nil
+func findPageByName(pageName string, pages []csn.Page) (csn.Page, error) {
+	for i := range pages {
+		if pageName == pages[i].Name {
+			return pages[i], nil
+		}
+	}
+	return csn.Page{}, fmt.Errorf("page not found: %q", pageName)
 }
